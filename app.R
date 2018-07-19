@@ -7,6 +7,7 @@ ui <- fluidPage(
   checkboxGroupInput(inputId = "inStateGroup", label = "Input state",
                      choices = c("WA", "OR", "ID", "Other"), selected = c("WA", "OR", "ID", "Other")),
   sliderInput(inputId = "inYearSlide", label = "Select year range", min = 1984, max = 2014, value = c(1984, 2014)),
+  textInput(inputId = "inIdText", label = "Enter MTBS Fire ID"),
   selectInput(inputId = "inSelect", label = "Select input", choices = firelist$FireDesc),
   fluidRow(
     column(12,
@@ -15,7 +16,8 @@ ui <- fluidPage(
   ),
   plotOutput(outputId = "fireplot"),
   actionButton(inputId = "do", label = "Click Me"),
-  plotOutput(outputId = "fireplotzoom")
+  plotOutput(outputId = "fireplotzoom"),
+  textOutput(outputId = "fireID")
 )
 
 server <- function(input, output, session) {
@@ -25,26 +27,29 @@ server <- function(input, output, session) {
       x <- c(x[-which(x == "Other")], "CA", "MT", "NV", "UT", "WY")
     }
     y <- input$inYearSlide[1]:input$inYearSlide[2]
-    FireChoices <- firelist$FireDesc[substr(firelist$Fire_ID, 1, 2) %in% x & firelist$Year %in% y]
+    z <- ifelse(is.null(input$inIdText),firelist$Fire_ID, input$inIdText)
+    FireChoices <- firelist$FireDesc[substr(firelist$Fire_ID, 1, 2) %in% x 
+                                     & firelist$Year %in% y 
+                                     & firelist$Fire_ID %in% firelist$Fire_ID[grep(z, firelist$Fire_ID)]]
     # Can also set the label and select items
     updateSelectInput(session, "inSelect",
                       label = paste("Select input label (", length(FireChoices), ")"),
-                      choices = FireChoices,
-                      selected = head(x, 1)
+                      choices = FireChoices
     )
   })
   output$fireplot <- renderPlot({
-    plot(pnw.map)
+    plot(pnw)
     plot(fire.perim[fire.perim@data$FireDesc == input$inSelect,], col = "red", border = "red", lwd = 3, add = T)
   })
   output$table <- renderTable(firelist[firelist$FireDesc == input$inSelect,c("Fire_Name", "Year", "Acres", "StartDate", "Fire_ID")])
   fire <- eventReactive(input$do, {input$inSelect})
   output$fireplotzoom <- renderPlot({plot(fire.perim[fire.perim@data$FireDesc %in% fire(),])})
-
+  output$fireID <- renderText({unique(fire.perim$Fire_ID[fire.perim@data$FireDesc %in% fire()])})
+  
+  
 }
 
 shinyApp(ui, server)
-
 #############################
 library(reticulate)
 system('C:\\Python27\\ArcGIS10.4\\python.exe import sys')
