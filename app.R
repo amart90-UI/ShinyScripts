@@ -3,10 +3,10 @@ library(shiny)
 #############################################################
 
 ui <- fluidPage(
-  p("The checkbox group controls the select input"),
+  p("Select a fire below.  You may filter the list by the firest sart location, year or MTBS fire ID"),
   checkboxGroupInput(inputId = "inStateGroup", label = "Input state",
                      choices = c("WA", "OR", "ID", "Other"), selected = c("WA", "OR", "ID", "Other")),
-  sliderInput(inputId = "inYearSlide", label = "Select year range", min = 1984, max = 2014, value = c(1984, 2014)),
+  sliderInput(inputId = "inYearSlide", label = "Select year range", min = 1984, max = 2014, value = c(1984, 2014), sep = ""),
   textInput(inputId = "inIdText", label = "Enter MTBS Fire ID"),
   selectInput(inputId = "inSelect", label = "Select input", choices = firelist$FireDesc),
   fluidRow(
@@ -50,6 +50,8 @@ server <- function(input, output, session) {
 }
 
 shinyApp(ui, server)
+
+
 #############################
 library(reticulate)
 system('C:\\Python27\\ArcGIS10.4\\python.exe import sys')
