@@ -1,5 +1,4 @@
 library(shiny)
-firelist <- data2
 
 #############################################################
 
@@ -47,6 +46,19 @@ server <- function(input, output, session) {
 shinyApp(ui, server)
 
 #############################
+library(reticulate)
+system('C:\\Python27\\ArcGIS10.4\\python.exe import sys')
+system('S:\\COS\\PyroGeog\\amartinez\\Ranking\\ShinyData\\python.exe version.py')
+a <- py_run_file('S:\\COS\\PyroGeog\\amartinez\\Ranking\\ShinyData\\add.py', convert = T)
+py_run_string("import sys")
+py_run_string({"print (sys.version)"})
+import("sys")
+use_python("C:\\Python27\\x64\\python.exe")
+initialize_python()
 
 
-
+###
+source_python('S:\\COS\\PyroGeog\\amartinez\\Ranking\\ShinyData\\add.py')
+add(5,10)
+py_run_string('x = 10')
+py$x
