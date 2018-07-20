@@ -20,7 +20,7 @@ ui <- fluidPage(
   selectInput(inputId = "inCrit", label = "Which criteria to color by", 
               choices = c("Size", "Isolation")),
   plotOutput(outputId = "fireplotzoom"),
-  textOutput(outputId = "fireID")
+  downloadButton(outputId = "downloadFire", label = 'Download fire perimeter')
 )
 
 server <- function(input, output, session) {
@@ -71,7 +71,22 @@ server <- function(input, output, session) {
     plot(fire.sel(),)
     plot(unb.sel(), add = T, col = col(), border = col())
   })
-  output$fireID <- renderText({fire.id()})
+  
+  output$downloadFire <- downloadHandler(
+    filename = 'fire_perim.zip',
+    content = function(file) {
+      if (length(Sys.glob("fire_perim.*"))>0){
+        file.remove(Sys.glob("fire_perim.*"))
+      }
+      writeOGR(fire.sel(), dsn="fire_perim.shp", layer="fire_perim", driver="ESRI Shapefile")
+      #write.csv(as.data.frame(cbind(getGeoContent()@data, as.data.frame(getGeoContent()@coords))), "fbCrawl.csv")
+      zip(zipfile='fire_perim.zip', files=Sys.glob("fire_perim.*"))
+      file.copy("fire_perim.zip", file)
+      if (length(Sys.glob("fire_perim.*"))>0){
+        file.remove(Sys.glob("fire_perim.*"))
+      }
+    }
+  )
   
   # Define Functions
   Size <- function(ui){
@@ -113,6 +128,7 @@ server <- function(input, output, session) {
 }
 
 shinyApp(ui, server)
+
 
 
 #############################
