@@ -18,7 +18,7 @@ ui <- fluidPage(
   plotOutput(outputId = "fireplot"),
   actionButton(inputId = "do", label = "Click Me"),
   selectInput(inputId = "inCrit", label = "Which criteria to color by", 
-              choices = c("Size", "Isolation")),
+              choices = c("Size", "Isolation", "Seedling", "Infrastructure", "Stand Age")),
   plotOutput(outputId = "fireplotzoom"),
   downloadButton(outputId = "downloadFire", label = 'Download fire perimeter'),
   downloadButton(outputId = "downloadUnb", label = 'Download unburned island')
@@ -59,20 +59,32 @@ server <- function(input, output, session) {
   #isol <- eventReactive(input$do, {
   #  if("Isloation" %in% input$inCrit){Isolation(unb.sel(), fire.sel())
   #    }})
+  
   size <- eventReactive(input$do, {Size(unb.sel())})
   isol <- eventReactive(input$do, {Isolation(unb.sel(), fire.sel())})
-  col <- eventReactive(input$do, {
+  seed <- eventReactive(input$do, {Seedling(unb.sel(), fire.sel())})
+  infra <- eventReactive(input$do, {Infrastructure(unb.sel(), fire.sel())})
+  age <- eventReactive(input$do, {StandAge(unb.sel(), fire.sel())})
+  col <- reactive({
+    #col <- eventReactive(input$do, {
     if(input$inCrit == "Size"){
       Col(unb.sel(), size())
     } else if(input$inCrit == "Isolation"){
       Col(unb.sel(), isol())
+    } else if(input$inCrit == "Seedling"){
+      Col(unb.sel(), seed())
+    } else if(input$inCrit == "Infrastructure"){
+      Col(unb.sel(), infra())
+    } else if(input$inCrit == "Stand Age"){
+      Col(unb.sel(), age())
     }
   })
   
-  #unb.sel.tab <- eventReactive(input$do, {unb.sel()@data})
-  unb.sel.tab <- eventReactive(input$do, {data.frame(unb.sel()@data, Size = size(), Isolation = isol())})
-  unb.sel.app <- eventReactive(input$do, {unb.sel()})
-  #unb.sel.app@data <- eventReactive(input$do, {unb.sel.tab()})
+  unb.sel.tab <- eventReactive(input$do, {
+    data.frame(unb.sel()@data, Size = size(), Isolatn = isol(), 
+               Infrstr = infra(), StndAge = age())})
+  #unb.sel.app <- eventReactive(input$do, {unb.sel()})
+  unb.sel.app <- eventReactive(input$do, {SpatialPolygonsDataFrame(unb.sel(), data = unb.sel.tab())})
   
   
   output$fireplotzoom <- renderPlot({
@@ -113,13 +125,15 @@ server <- function(input, output, session) {
   
   
   # Define Functions #
-  Size <- function(ui){
+  #Define Size function
+  Size <- function(unb){
     require(rgeos)
     # Calculate size of unburned islands
-    size.ui <- gArea(ui, byid = T)
-    return(size.ui)
+    size.unb <- gArea(unb, byid = T)
+    return(size.unb)
   }
   
+  #Define Isolation function
   Isolation <- function(unb, fire.perim){
     # Load packages
     require(rgdal)
@@ -140,6 +154,114 @@ server <- function(input, output, session) {
     s.min <- rowMins(as.matrix(s.min))
     
     return(s.min)
+  }
+  
+  # Define Seedling function (7.00 min)
+  Seedling <- function(unb, fire.perim) {
+    # Load packages
+    require(dismo)
+    require(raster)
+    require(rgdal)
+    require(rgeos)
+    
+    # Create voronoi polygons
+    cen <- gCentroid(unb, byid=T)
+    ext <- extent(unb)
+    unb.alloc <- voronoi(cen, ext = c(ext[1], ext[2], ext[3], ext[4]))
+    unb.alloc <- crop(unb.alloc, fire.perim)
+    unb.alloc@data$ID <- unb@data$ID
+    
+    # Create blank raster
+    mround <- function(x,base,method){ 
+      if(method == "min") {
+        return(base*floor(x/base))
+      } else if(method == "max"){
+        return(base*ceiling(x/base))
+      } else {
+        stop("Unrecognized method: choose 'min' or 'max'.")
+      }
+    }
+    
+    xmin <- mround(xmin(fire.perim), 30, "min")
+    xmax <- mround(xmax(fire.perim), 30, "max")
+    ymin <- mround(ymin(fire.perim), 30, "min")
+    ymax <- mround(ymax(fire.perim), 30, "max")
+    r1 <- (xmax - xmin) / 30
+    r2 <- (ymax - ymin) / 30
+    blank <- raster(resolution = 30, xmn = xmin, xmx = xmax, ymn = ymin, 
+                    ymx = ymax, crs = projection(fire.perim), vals = 1)
+    blank <- mask(blank, fire.perim)
+    
+    # Rasterize UI and perimeter
+    unb.r <- rasterize(unb, blank, field=2)
+    fire.line <- as(fire.perim, 'SpatialLines')
+    perim.r <- rasterize(fire.line, blank, field=2)
+    
+    # Distance to UI
+    unb.r.2 <- sum(unb.r, perim.r, na.rm = T)
+    unb.r.2[unb.r.2 >= 2] <- 2
+    unb.r.2[unb.r.2 == 0] <- NA
+    dist <- distance(unb.r.2)
+    dist <- mask(dist, fire.perim)
+    
+    # Calculate probability of seedling presence
+    seed <- (-1 / (1 + 35 * exp(-0.016 * dist))) + 1
+    
+    # Assign seedling presence probability to UI
+    seed.sum <- extract(seed, unb.alloc, method = 'simple', small = T, 
+                        fun = sum, na.rm = T, df = T, sp = T)
+    return(seed.sum@data$layer)
+  }
+  
+  # Number of federal structures
+  Infrastructure <- function(unb, fire.perim){
+    # Load packages
+    require(rgdal)
+    require(rgeos)
+    require(matrixStats)
+    
+    # Load buildings
+    #fcc <- readOGR("Infrastructure/Intermediates/FCC_Point.shp")
+    #nps <- readOGR("Infrastructure/Intermediates/NPS_Point.shp")
+    #usfs <- readOGR("Infrastructure/Intermediates/USFS_Point.shp")
+    #blm.p <- readOGR("Infrastructure/Intermediates/BLM_Point.shp")
+    #blm.l <- readOGR("Infrastructure/Intermediates/BLM_Line.shp")
+    
+    # Test if UI contains a building
+    fcc.unb <- rowSums(gIntersects(fcc, unb, byid=T))
+    nps.unb <- rowSums(gIntersects(nps, unb, byid=T))
+    usfs.unb <- rowSums(gIntersects(usfs, unb, byid=T))
+    blm.unb <- rowSums(gIntersects(blm.p, unb, byid=T)) + 
+      rowSums(gIntersects(blm.l, unb, byid=T))
+    infra.unb <- fcc.unb + nps.unb + usfs.unb + blm.unb
+    
+    return(infra.unb)
+  }
+  
+  # Define function to calculate mean stand age
+  StandAge <- function(unb, fire.perim){
+    # Load packages
+    require(rgdal)
+    require(raster)
+    
+    # Load data
+    age <- raster("StandAge/StandAge.clip.tif")
+    
+    # Transform projection
+    fire.proj <- spTransform(fire.perim, CRS(projection(age)))
+    unb.proj <- spTransform(unb, CRS(projection(age)))
+    
+    # Clip to fire extent
+    age <- crop(age, extent(fire.proj))
+    
+    # Mask stand age to UIs
+    age.unb <- mask(age, unb.proj)
+    
+    # Extract mean stand age values for each UI
+    unb.age <- extract(age.unb, unb.proj, small=T, fun=mean, na.rm=T)
+    unb.age[is.na(unb.age)] <- 0
+    
+    return(as.numeric(unb.age))
   }
   
   Col <- function(unb.in, crit){
