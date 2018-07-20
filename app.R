@@ -20,11 +20,13 @@ ui <- fluidPage(
   selectInput(inputId = "inCrit", label = "Which criteria to color by", 
               choices = c("Size", "Isolation")),
   plotOutput(outputId = "fireplotzoom"),
-  downloadButton(outputId = "downloadFire", label = 'Download fire perimeter')
+  downloadButton(outputId = "downloadFire", label = 'Download fire perimeter'),
+  downloadButton(outputId = "downloadUnb", label = 'Download unburned island')
 )
 
 server <- function(input, output, session) {
-  
+  require(rgdal)
+  require(zip)
   observe({
     x <- input$inStateGroup
     if("Other" %in% x){
@@ -67,6 +69,12 @@ server <- function(input, output, session) {
     }
   })
   
+  #unb.sel.tab <- eventReactive(input$do, {unb.sel()@data})
+  unb.sel.tab <- eventReactive(input$do, {data.frame(unb.sel()@data, Size = size(), Isolation = isol())})
+  unb.sel.app <- eventReactive(input$do, {unb.sel()})
+  #unb.sel.app@data <- eventReactive(input$do, {unb.sel.tab()})
+  
+  
   output$fireplotzoom <- renderPlot({
     plot(fire.sel(),)
     plot(unb.sel(), add = T, col = col(), border = col())
@@ -79,7 +87,6 @@ server <- function(input, output, session) {
         file.remove(Sys.glob("fire_perim.*"))
       }
       writeOGR(fire.sel(), dsn="fire_perim.shp", layer="fire_perim", driver="ESRI Shapefile")
-      #write.csv(as.data.frame(cbind(getGeoContent()@data, as.data.frame(getGeoContent()@coords))), "fbCrawl.csv")
       zip(zipfile='fire_perim.zip', files=Sys.glob("fire_perim.*"))
       file.copy("fire_perim.zip", file)
       if (length(Sys.glob("fire_perim.*"))>0){
@@ -88,7 +95,24 @@ server <- function(input, output, session) {
     }
   )
   
-  # Define Functions
+  output$downloadUnb <- downloadHandler(
+    filename = 'unb_isl.zip',
+    content = function(file) {
+      if (length(Sys.glob("unb_isl.*"))>0){
+        file.remove(Sys.glob("unb_isl.*"))
+      }
+      writeOGR(unb.sel.app(), dsn="unb_isl.shp", layer="unb_isl", driver="ESRI Shapefile")
+      write.csv(unb.sel.tab(), file =  "unb_isl.csv")
+      zip(zipfile='unb_isl.zip', files=Sys.glob("unb_isl.*"))
+      file.copy("unb_isl.zip", file)
+      if (length(Sys.glob("unb_isl.*"))>0){
+        file.remove(Sys.glob("unb_isl.*"))
+      }
+    }
+  )
+  
+  
+  # Define Functions #
   Size <- function(ui){
     require(rgeos)
     # Calculate size of unburned islands

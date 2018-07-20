@@ -1,3 +1,6 @@
+library(shiny)
+library(rgeos)
+library(zip)
 library(rgdal)
 
 setwd("S:/COS/PyroGeog/amartinez/Ranking/CriteriaData")
@@ -17,7 +20,7 @@ unb <- readOGR("UnburnedIsland/unburned_areas.shp", stringsAsFactors = F)
 
 
 ##
-rm(list = objects()[- which(objects() %in% c("unb", "fire.perim", "pnw"))])
+rm(list = objects()[- which(objects() %in% c("unb", "fire.perim", "pnw", "firelist"))])
 
 ######
 
