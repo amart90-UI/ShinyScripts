@@ -3,6 +3,7 @@ library(shiny)
 #############################################################
 
 ui <- fluidPage(
+  useShinyjs(),
   p("Select a fire below.  You may filter the list by the firest sart location, year or MTBS fire ID"),
   checkboxGroupInput(inputId = "inStateGroup", label = "Input state",
                      choices = c("WA", "OR", "ID", "Other"), 
@@ -21,9 +22,8 @@ ui <- fluidPage(
   selectInput(inputId = "inCrit", label = "Which criteria to color by", 
               choices = c("Size", "Isolation", "Seedling", "Infrastructure", "Stand Age", "Critical Habitat", "Invasive")),
   withSpinner(plotOutput(outputId = "fireplotzoom"), type = 5, color = "#ccd1c8"),
-  downloadButton(outputId = "downloadFire", label = 'Download fire perimeter'),
-  #withSpinner(downloadButton(outputId = "downloadUnb", label = 'Download unburned island'), type = 5, color = "#961515")
-  downloadButton(outputId = "downloadUnb", label = 'Download unburned island')
+  disabled(downloadButton(outputId = "downloadFire", label = 'Download fire perimeter')),
+  disabled(downloadButton(outputId = "downloadUnb", label = 'Download unburned island'))
 )
 
 server <- function(input, output, session) {
@@ -93,20 +93,17 @@ server <- function(input, output, session) {
     data.frame(unb.sel()@data, Size = size(), Isolatn = isol(), Seed = seed(),
                Infrstr = infra(), StndAge = age(), CritHab = crithab(), Invasiv = invas())})
   
-  unb.sel.app <- eventReactive(input$downloadFire, {SpatialPolygonsDataFrame(unb.sel(), data = unb.sel.tab())})
-  
-  
-  #output$fireplotzoom <- renderPlot({
-  #  plot(fire.sel(),)
-  #  plot(unb.sel(), add = T, col = col(), border = col())
-  #})
+  unb.sel.app <- eventReactive(input$do, {SpatialPolygonsDataFrame(unb.sel(), data = unb.sel.tab())})
+  observeEvent(input$do, {
+    enable("downloadUnb")
+    enable("downloadFire")
+  })
   
   clk <- reactiveValues(default = 0)
   observeEvent(input$do, {
     clk$default <- input$do
   })
   
-  #fplot <- plot(fire.perim[fire.perim@data$FireDesc == input$inSelect,])
   fplot <-  eventReactive({
     input$do
     input$inSelect
@@ -117,16 +114,6 @@ server <- function(input, output, session) {
   }, ignoreNULL = F)
   
   output$fireplotzoom <- renderPlot({fplot()})
-  
-  #output$fireplotzoom <- renderPlot({
-  #  plot(fire.perim[fire.perim@data$FireDesc == input$inSelect,])
-  #  if(input$do >0) plot(unb.sel(), add = T, col = col(), border = col())
-  #})}, ignoreNULL = F))
-  
-  #output$fireplotzoom <- if(!is.null(fire.sel)) renderPlot({
-  #  plot(fire.sel(),)
-  #  plot(unb.sel(), add = T, col = col(), border = col())
-  #})
   
   output$downloadFire <- downloadHandler(
     filename = 'fire_perim.zip',
@@ -146,14 +133,14 @@ server <- function(input, output, session) {
   output$downloadUnb <- downloadHandler(
     filename = 'unb_isl.zip',
     content = function(file) {
-      if (length(Sys.glob("unb_isl.*"))>0){
+      if (length(Sys.glob("unb_isl.*")) > 0){
         file.remove(Sys.glob("unb_isl.*"))
       }
       writeOGR(unb.sel.app(), dsn="unb_isl.shp", layer="unb_isl", driver="ESRI Shapefile")
       write.csv(unb.sel.tab(), file =  "unb_isl.csv")
       zip(zipfile='unb_isl.zip', files=Sys.glob("unb_isl.*"))
       file.copy("unb_isl.zip", file)
-      if (length(Sys.glob("unb_isl.*"))>0){
+      if (length(Sys.glob("unb_isl.*")) > 0){
         file.remove(Sys.glob("unb_isl.*"))
       }
     }
@@ -373,23 +360,3 @@ server <- function(input, output, session) {
 }
 
 shinyApp(ui, server)
-
-
-
-#############################
-library(reticulate)
-system('C:\\Python27\\ArcGIS10.4\\python.exe import sys')
-system('S:\\COS\\PyroGeog\\amartinez\\Ranking\\ShinyData\\python.exe version.py')
-a <- py_run_file('S:\\COS\\PyroGeog\\amartinez\\Ranking\\ShinyData\\add.py', convert = T)
-py_run_string("import sys")
-py_run_string({"print (sys.version)"})
-import("sys")
-use_python("C:\\Python27\\x64\\python.exe")
-initialize_python()
-
-
-###
-source_python('S:\\COS\\PyroGeog\\amartinez\\Ranking\\ShinyData\\add.py')
-add(5,10)
-py_run_string('x = 10')
-py$x
