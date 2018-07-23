@@ -8,6 +8,7 @@ ui <- fluidPage(
                      choices = c("WA", "OR", "ID", "Other"), 
                      selected = c("WA", "OR", "ID", "Other")),
   sliderInput(inputId = "inYearSlide", label = "Select year range", min = 1984, max = 2014, value = c(1984, 2014), sep = ""),
+  textInput(inputId = "inNameText", label = "Enter FireName"),
   textInput(inputId = "inIdText", label = "Enter MTBS Fire ID"),
   selectInput(inputId = "inSelect", label = "Select input", choices = firelist$FireDesc),
   fluidRow(
@@ -18,25 +19,34 @@ ui <- fluidPage(
   plotOutput(outputId = "fireplot"),
   actionButton(inputId = "do", label = "Click Me"),
   selectInput(inputId = "inCrit", label = "Which criteria to color by", 
-              choices = c("Size", "Isolation", "Seedling", "Infrastructure", "Stand Age")),
-  plotOutput(outputId = "fireplotzoom"),
+              choices = c("Size", "Isolation", "Seedling", "Infrastructure", "Stand Age", "Critical Habitat", "Invasive")),
+  withSpinner(plotOutput(outputId = "fireplotzoom"), type = 5, color = "#ccd1c8"),
   downloadButton(outputId = "downloadFire", label = 'Download fire perimeter'),
+  #withSpinner(downloadButton(outputId = "downloadUnb", label = 'Download unburned island'), type = 5, color = "#961515")
   downloadButton(outputId = "downloadUnb", label = 'Download unburned island')
 )
 
 server <- function(input, output, session) {
   require(rgdal)
+  require(rgeos)
   require(zip)
+  require(dismo)
+  require(raster)
+  require(matrixStats)
+  #load("D:/antho/Google Drive/UI-Drive/Refugia/SpData")
+  
   observe({
     x <- input$inStateGroup
     if("Other" %in% x){
       x <- c(x[-which(x == "Other")], "CA", "MT", "NV", "UT", "WY")
     }
     y <- input$inYearSlide[1]:input$inYearSlide[2]
-    z <- ifelse(is.null(input$inIdText),firelist$Fire_ID, input$inIdText)
+    z <- ifelse(is.null(input$inIdText),firelist$Fire_ID, toupper(input$inIdText))
+    zz <- ifelse(is.null(input$inIdText),firelist$Fire_Name, toupper(input$inNameText))
     FireChoices <- firelist$FireDesc[substr(firelist$Fire_ID, 1, 2) %in% x 
                                      & firelist$Year %in% y 
-                                     & firelist$Fire_ID %in% firelist$Fire_ID[grep(z, firelist$Fire_ID)]]
+                                     & firelist$Fire_ID %in% firelist$Fire_ID[grep(z, firelist$Fire_ID)]
+                                     & firelist$Fire_Name %in% firelist$Fire_Name[grep(zz, firelist$Fire_Name)]]
     # Can also set the label and select items
     updateSelectInput(session, "inSelect",
                       label = paste("Select input label (", length(FireChoices), ")"),
@@ -52,39 +62,38 @@ server <- function(input, output, session) {
   fire.id <- eventReactive(input$do, {unique(fire.perim$Fire_ID[fire.perim@data$FireDesc %in% fire()])})
   fire.sel <- eventReactive(input$do, {fire.perim[fire.perim$Fire_ID %in% fire.id(),]})
   unb.sel <- eventReactive(input$do, {unb[unb$fire_id %in% fire.id(),]})
-  #eventReactive(input$do, {assign(unb.sel()@data$size, Size(unb.sel))})
-  #size <- eventReactive(input$do,{
-  #  if("Size" %in% input$inCrit){Size(unb.sel())
-  #    }})
-  #isol <- eventReactive(input$do, {
-  #  if("Isloation" %in% input$inCrit){Isolation(unb.sel(), fire.sel())
-  #    }})
   
   size <- eventReactive(input$do, {Size(unb.sel())})
   isol <- eventReactive(input$do, {Isolation(unb.sel(), fire.sel())})
   seed <- eventReactive(input$do, {Seedling(unb.sel(), fire.sel())})
   infra <- eventReactive(input$do, {Infrastructure(unb.sel(), fire.sel())})
   age <- eventReactive(input$do, {StandAge(unb.sel(), fire.sel())})
+  crithab <- eventReactive(input$do, {CritHabitat(unb.sel())})
+  invas <- eventReactive(input$do, {Invasive(unb.sel(), fire.sel())})
+  
   col <- reactive({
-    #col <- eventReactive(input$do, {
     if(input$inCrit == "Size"){
-      Col(unb.sel(), size())
+      Col(unb.sel(), unb.sel.tab()$Size)
     } else if(input$inCrit == "Isolation"){
-      Col(unb.sel(), isol())
+      Col(unb.sel(), unb.sel.tab()$Isolatn)
     } else if(input$inCrit == "Seedling"){
-      Col(unb.sel(), seed())
+      Col(unb.sel(), unb.sel.tab()$Seed)
     } else if(input$inCrit == "Infrastructure"){
-      Col(unb.sel(), infra())
+      Col(unb.sel(), unb.sel.tab()$Infrstr)
     } else if(input$inCrit == "Stand Age"){
-      Col(unb.sel(), age())
+      Col(unb.sel(), unb.sel.tab()$StndAge)
+    } else if(input$inCrit == "Critical Habitat"){
+      Col(unb.sel(), unb.sel.tab()$CritHab)
+    } else if(input$inCrit == "Invasive"){
+      Col(unb.sel(), unb.sel.tab()$Invasiv)
     }
   })
   
   unb.sel.tab <- eventReactive(input$do, {
-    data.frame(unb.sel()@data, Size = size(), Isolatn = isol(), 
-               Infrstr = infra(), StndAge = age())})
-  #unb.sel.app <- eventReactive(input$do, {unb.sel()})
-  unb.sel.app <- eventReactive(input$do, {SpatialPolygonsDataFrame(unb.sel(), data = unb.sel.tab())})
+    data.frame(unb.sel()@data, Size = size(), Isolatn = isol(), Seed = seed(),
+               Infrstr = infra(), StndAge = age(), CritHab = crithab(), Invasiv = invas())})
+  
+  unb.sel.app <- eventReactive(input$downloadFire, {SpatialPolygonsDataFrame(unb.sel(), data = unb.sel.tab())})
   
   
   output$fireplotzoom <- renderPlot({
@@ -264,11 +273,74 @@ server <- function(input, output, session) {
     return(as.numeric(unb.age))
   }
   
-  Col <- function(unb.in, crit){
+  # Critical habitat function (1.04 min)
+  CritHabitat <- function(unb){
+    # Load packages
+    require(rgdal)
+    require(raster)
+    require(rgeos)
+    
+    # Load Critical Habitat data
+    #hab <- readOGR("CriticalHabitat/CriticalHabitat.shp")
+    
+    # Identify UIs with Critical Habitat
+    int <- suppressWarnings({intersect(hab, unb)})
+    if(is.null(int)){
+      int <- data.frame(ID = NA, listing_st = NA)
+    }
+    
+    # Add score based upon type of species
+    h.score <- data.frame(listing_st= c("Endangered", "Threatened", 
+                                        "Recovery", "Proposed Endangered"),
+                          score.habitat= c(1,.5,.2,.2))
+    hab.unb <- merge(int[, c("ID", "listing_st")], h.score, by= "listing_st")
+    hab.unb <- merge(unb@data, hab.unb, by="ID", all=T)$score.habitat
+    hab.unb[is.na(hab.unb)] <- 0
+    return(as.numeric(hab.unb))
+  }
+  
+  # Define proportion of invasive species cover
+  Invasive <- function(unb, fire.perim){
+    # Load packages
+    require(rgdal)
+    require(rgeos)
+    require(raster)
+    
+    # Load invasive species data
+    #inv <- readOGR("Invasive/Invasive.shp")
+    
+    # Clip data to fire perimeter
+    inv <- crop(inv, fire.perim)
+    if(is.null(inv)){
+      out <- rep(0, nrow(unb))
+    } else {
+      inv <- gIntersection(unb, inv, byid = T)
+      if(is.null(inv)){
+        out <- rep(0, nrow(unb))
+      } else {
+        unb.over <- over(inv, unb, returnList = F)
+        inv.area <- sapply(slot(inv, "polygons"), function(i) slot(i, "area"))
+        inv.df <- data.frame(ID = unb.over$ID,
+                             inv.area = inv.area)
+        inv.df <- aggregate(inv.area ~ ID, data = inv.df, FUN = sum)
+        inv.df$unb.area <- sapply(slot(unb[unb@data$ID %in% inv.df$ID,], "polygons"), 
+                                  function(i) slot(i, "area"))
+        inv.df$prop.inv <- inv.df$inv.area / inv.df$unb.area
+        inv.df <- merge(data.frame(ID = unb@data$ID), inv.df[, c(1,4)], all = T)
+        inv.df$prop.inv[is.na(inv.df$prop.inv)] <- 0
+        out <- inv.df$prop.inv
+      }
+      
+      
+    }
+    return(out)
+  }
+  
+  Col <- function(unb, crit){
     cl <- data.frame(crit = sort(unique(crit)), 
                      col = colorRampPalette(c("green", "yellow", "orange", "red"))
                      (length(unique(crit))))
-    cl <- merge(data.frame(ID = unb.in@data$ID, crit = crit), cl, by = "crit")
+    cl <- merge(data.frame(ID = unb@data$ID, crit = crit), cl, by = "crit")
     cl <- as.character(cl[order(cl$ID), "col"])
   }
 }
