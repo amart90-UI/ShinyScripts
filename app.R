@@ -96,10 +96,37 @@ server <- function(input, output, session) {
   unb.sel.app <- eventReactive(input$downloadFire, {SpatialPolygonsDataFrame(unb.sel(), data = unb.sel.tab())})
   
   
-  output$fireplotzoom <- renderPlot({
-    plot(fire.sel(),)
-    plot(unb.sel(), add = T, col = col(), border = col())
+  #output$fireplotzoom <- renderPlot({
+  #  plot(fire.sel(),)
+  #  plot(unb.sel(), add = T, col = col(), border = col())
+  #})
+  
+  clk <- reactiveValues(default = 0)
+  observeEvent(input$do, {
+    clk$default <- input$do
   })
+  
+  #fplot <- plot(fire.perim[fire.perim@data$FireDesc == input$inSelect,])
+  fplot <-  eventReactive({
+    input$do
+    input$inSelect
+    input$inCrit
+  }, {
+    plot(fire.perim[fire.perim@data$FireDesc == input$inSelect,])
+    if(clk$default > 0) plot(unb.sel(), add = T, col = col(), border = col())
+  }, ignoreNULL = F)
+  
+  output$fireplotzoom <- renderPlot({fplot()})
+  
+  #output$fireplotzoom <- renderPlot({
+  #  plot(fire.perim[fire.perim@data$FireDesc == input$inSelect,])
+  #  if(input$do >0) plot(unb.sel(), add = T, col = col(), border = col())
+  #})}, ignoreNULL = F))
+  
+  #output$fireplotzoom <- if(!is.null(fire.sel)) renderPlot({
+  #  plot(fire.sel(),)
+  #  plot(unb.sel(), add = T, col = col(), border = col())
+  #})
   
   output$downloadFire <- downloadHandler(
     filename = 'fire_perim.zip',
