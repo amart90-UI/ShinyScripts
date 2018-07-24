@@ -4,27 +4,40 @@ library(shiny)
 
 ui <- fluidPage(
   useShinyjs(),
-  p("Select a fire below.  You may filter the list by the firest sart location, year or MTBS fire ID"),
-  checkboxGroupInput(inputId = "inStateGroup", label = "Input state",
-                     choices = c("WA", "OR", "ID", "Other"), 
-                     selected = c("WA", "OR", "ID", "Other")),
-  sliderInput(inputId = "inYearSlide", label = "Select year range", min = 1984, max = 2014, value = c(1984, 2014), sep = ""),
-  textInput(inputId = "inNameText", label = "Enter FireName"),
-  textInput(inputId = "inIdText", label = "Enter MTBS Fire ID"),
-  selectInput(inputId = "inSelect", label = "Select input", choices = firelist$FireDesc),
-  fluidRow(
-    column(12,
-           tableOutput('table')
+  titlePanel("Fire Refugia Ranking"),
+  sidebarLayout(
+    sidebarPanel(
+      p("Use filters to select a fire"),
+      checkboxGroupInput(inputId = "inStateGroup", label = "Input state",
+                         choices = c("WA", "OR", "ID", "Other"), 
+                         selected = c("WA", "OR", "ID", "Other")),
+      sliderInput(inputId = "inYearSlide", label = "Select year range", min = 1984, max = 2014, value = c(1984, 2014), sep = ""),
+      textInput(inputId = "inNameText", label = "Enter FireName"),
+      textInput(inputId = "inIdText", label = "Enter MTBS Fire ID"),
+      br(),
+      selectInput(inputId = "inSelect", label = "Select fire", choices = firelist$FireDesc)
+    ),
+    mainPanel(
+      plotOutput(outputId = "fireplot"),
+      tableOutput('table')
     )
   ),
-  plotOutput(outputId = "fireplot"),
-  actionButton(inputId = "do", label = "Click Me"),
-  selectInput(inputId = "inCrit", label = "Which criteria to color by", 
-              choices = c("Size", "Isolation", "Seedling", "Infrastructure", "Stand Age", "Critical Habitat", "Invasive")),
-  withSpinner(plotOutput(outputId = "fireplotzoom"), type = 5, color = "#ccd1c8"),
-  disabled(downloadButton(outputId = "downloadFire", label = 'Download fire perimeter')),
-  disabled(downloadButton(outputId = "downloadUnb", label = 'Download unburned island'))
+  br(),
+  sidebarLayout(
+    sidebarPanel(
+      column(4, offset = 4, actionButton(inputId = "do", label = "  Calculate Criteria  ")),
+      br(), br(), br(),
+      selectInput(inputId = "inCrit", label = "Which criteria to color by", 
+                  choices = c("Size", "Isolation", "Seedling", "Infrastructure", "Stand Age", "Critical Habitat", "Invasive")),
+      disabled(downloadButton(outputId = "downloadFire", label = 'Download fire perimeter')),
+      disabled(downloadButton(outputId = "downloadUnb", label = 'Download unburned island'))
+    ),
+    mainPanel(
+      withSpinner(plotOutput(outputId = "fireplotzoom"), type = 5, color = "#ccd1c8")
+    )
+  )
 )
+
 
 server <- function(input, output, session) {
   require(rgdal)
@@ -49,7 +62,7 @@ server <- function(input, output, session) {
                                      & firelist$Fire_Name %in% firelist$Fire_Name[grep(zz, firelist$Fire_Name)]]
     # Can also set the label and select items
     updateSelectInput(session, "inSelect",
-                      label = paste("Select input label (", length(FireChoices), ")"),
+                      label = paste("Select fire (", length(FireChoices), ")"),
                       choices = FireChoices
     )
   })
