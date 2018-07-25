@@ -28,7 +28,8 @@ ui <- fluidPage(
       column(4, offset = 4, actionButton(inputId = "do", label = "  Calculate Criteria  ")),
       br(), br(), br(),
       selectInput(inputId = "inCrit", label = "Which criteria to color by", 
-                  choices = c("Size", "Isolation", "Seedling", "Infrastructure", "Stand Age", "Critical Habitat", "Invasive")),
+                  choices = c("Size", "Isolation", "Seedling", "Infrastructure", "Stand Age", 
+                              "Critical Habitat", "Invasive", "Rarity (land cover)")),
       disabled(downloadButton(outputId = "downloadFire", label = 'Download fire perimeter')),
       disabled(downloadButton(outputId = "downloadUnb", label = 'Download unburned island'))
     ),
@@ -83,6 +84,7 @@ server <- function(input, output, session) {
   age <- eventReactive(input$do, {StandAge(unb.sel(), fire.sel())})
   crithab <- eventReactive(input$do, {CritHabitat(unb.sel())})
   invas <- eventReactive(input$do, {Invasive(unb.sel(), fire.sel())})
+  lcov <- eventReactive(input$do, {LandCover(unb.sel(), fire.sel())})
   
   col <- reactive({
     if(input$inCrit == "Size"){
@@ -99,12 +101,15 @@ server <- function(input, output, session) {
       Col(unb.sel(), unb.sel.tab()$CritHab)
     } else if(input$inCrit == "Invasive"){
       Col(unb.sel(), unb.sel.tab()$Invasiv)
+    } else if(input$inCrit == "Rarity (land cover)"){
+      Col(unb.sel(), unb.sel.tab()$lcov)
     }
   })
   
   unb.sel.tab <- eventReactive(input$do, {
     data.frame(unb.sel()@data, Size = size(), Isolatn = isol(), Seed = seed(),
-               Infrstr = infra(), StndAge = age(), CritHab = crithab(), Invasiv = invas())})
+               Infrstr = infra(), StndAge = age(), CritHab = crithab(), 
+               Invasiv = invas(), LandCvr = lcov())})
   
   unb.sel.app <- eventReactive(input$do, {SpatialPolygonsDataFrame(unb.sel(), data = unb.sel.tab())})
   observeEvent(input$do, {
@@ -363,6 +368,56 @@ server <- function(input, output, session) {
     return(out)
   }
   
+  # 
+  LandCover <- function(unb, fire.perim){
+    # Load packages
+    require(rgdal)
+    require(raster)
+    
+    # Identify state and load land cover data
+    #pnw <- readOGR("PNW/pnw.shp")
+    
+    # Transform projections
+    fire.proj <- spTransform(fire.perim, projection(cvr))
+    unb.proj <- spTransform(unb, projection(cvr))
+    
+    # Clip land cover data to fire perimeter
+    cvr.fire <- crop(cvr, extent(fire.proj))
+    #cvr.fire <- mask(cvr.fire, fire.proj)
+    
+    # Get all land cover IDs present in UIs
+    cvr.unb <- mask(cvr.fire, unb.proj)
+    cvr.freq <- as.data.frame(freq(cvr.unb, useNA = "no"))
+    cvr.freq <- cvr.freq[order(cvr.freq$count), ]
+    
+    # Find mode land cover ID for each UI
+    #   Create mode (central tendency) function
+    Mode <- function(x) {
+      ux <- unique(x[!is.na(x)])
+      ux[which.max(tabulate(match(x, ux)))]
+    }
+    
+    #   Extract raster values by polgon (UI) and calculate mode
+    r.mode <- extract(cvr.unb, unb.proj)
+    #r.mode <- lapply(r.mode, function(x) x[!is.na(x)])
+    r.mode <-  as.numeric(lapply(r.mode, FUN=Mode))
+    #r.mode <- as.numeric(r.mode)
+    
+    # Calculate relative abundance by area of landcover type
+    #   Assign mode land cover value to each UI polygon
+    r.uniq <- unique(r.mode)
+    r.area <- sapply(r.uniq, function(x) sum(values(cvr.unb) == x, na.rm = T))
+    r.rel <- r.area/sum(r.area)
+    r.abun <- data.frame(lcover.mode=r.uniq, r.rel=r.rel)
+    
+    # Assign score to each UI based on mode landcover type
+    unb.list <- data.frame(ID = unb.proj@data$ID, r.mode)
+    unb.list <- merge(unb.list, r.abun, by.x="r.mode", by.y="lcover.mode")
+    unb.list <- unb.list[order(unb.list$ID), ]
+    
+    return(unb.list$r.rel)
+  }
+  
   Col <- function(unb, crit){
     cl <- data.frame(crit = sort(unique(crit)), 
                      col = colorRampPalette(c("green", "yellow", "orange", "red"))
@@ -371,5 +426,6 @@ server <- function(input, output, session) {
     cl <- as.character(cl[order(cl$ID), "col"])
   }
 }
+
 
 shinyApp(ui, server)
