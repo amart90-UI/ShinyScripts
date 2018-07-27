@@ -28,9 +28,9 @@ ui <- fluidPage(
       column(4, offset = 4, actionButton(inputId = "do", label = "  Calculate Criteria  ")),
       br(), br(), br(),
       selectInput(inputId = "inCrit", label = "Which criteria to color by", 
-                  choices = c("Size", "Isolation", "Seedling", "Infrastructure", "Stand Age", 
-                              "Critical Habitat", "Invasive", "Rarity (land cover)")),
-      disabled(downloadButton(outputId = "downloadFire", label = 'Download fire perimeter')),
+                  choices = c("Refugia Value", "Size", "Isolation", "Seedling", "Infrastructure",
+                              "Stand Age",, "Critical Habitat", "Invasive", "Rarity (land cover)")),
+      disabled(downloadButton(outputId = "downloadFire", label = "Download fire perimeter")),
       disabled(downloadButton(outputId = "downloadUnb", label = 'Download unburned island'))
     ),
     mainPanel(
@@ -85,6 +85,7 @@ server <- function(input, output, session) {
   crithab <- eventReactive(input$do, {CritHabitat(unb.sel())})
   invas <- eventReactive(input$do, {Invasive(unb.sel(), fire.sel())})
   lcov <- eventReactive(input$do, {LandCover(unb.sel(), fire.sel())})
+  eems <- eventReactive(input$do, {EEMS(unb.sel.tab1())})
   
   col <- reactive({
     if(input$inCrit == "Size"){
@@ -103,13 +104,17 @@ server <- function(input, output, session) {
       Col(unb.sel(), unb.sel.tab()$Invasiv)
     } else if(input$inCrit == "Rarity (land cover)"){
       Col(unb.sel(), unb.sel.tab()$lcov)
+    } else if(input$inCrit == "Refugia Value"){
+      Col(unb.sel(), unb.sel.tab()$REFVALUE)
     }
   })
   
-  unb.sel.tab <- eventReactive(input$do, {
+  unb.sel.tab1 <- eventReactive(input$do, {
     data.frame(unb.sel()@data, Size = size(), Isolatn = isol(), Seed = seed(),
                Infrstr = infra(), StndAge = age(), CritHab = crithab(), 
                Invasiv = invas(), LandCvr = lcov())})
+  unb.sel.tab <- eventReactive(input$do, {
+    data.frame(unb.sel.tab1(), eems())})
   
   unb.sel.app <- eventReactive(input$do, {SpatialPolygonsDataFrame(unb.sel(), data = unb.sel.tab())})
   observeEvent(input$do, {
@@ -416,6 +421,31 @@ server <- function(input, output, session) {
     unb.list <- unb.list[order(unb.list$ID), ]
     
     return(unb.list$r.rel)
+  }
+  
+  EEMS <- function(df){
+    Cvt2Fz <- function(variable, df){
+      x <- df[, variable]
+      t <- thresh$True[which(thresh$Variable == variable)]
+      f <- thresh$False[which(thresh$Variable == variable)]
+      m <- 2/(t-f)
+      b <- 1-m*t
+      ret <- (m*x)+b
+      ret <- ifelse(ret > 1, 1, ret)
+      ret <- ifelse(ret < -1, -1, ret)
+      return(ret)
+    }
+    
+    variables <- c("CritHab", "Infrstr", "Invasiv", "Isolatn", "LandCvr", "Seed", "StndAge", "Size")
+    fuzzy <- data.frame(ID = df$ID, 
+                        sapply(variables, Cvt2Fz, df = df))
+    fuzzy$Fz_HAB <- apply(fuzzy[, c("Size", "CritHab", "Invasiv")], 1, weighted.mean, w = c(3, 4, 3)) #weighted union
+    fuzzy$Fz_UNQ <- apply(fuzzy[, c("Seed", "LandCvr", "Isolatn", "StndAge")], 1, mean) #union
+    fuzzy$Fz_INF <- fuzzy$Infrstr
+    fuzzy$REFVALUE <- apply(fuzzy[, c("Fz_HAB", "Fz_UNQ", "Fz_INF")], 1, mean) #union
+    colnames(fuzzy)[2:9] <- paste0("Fz_", variables)
+    
+    return(fuzzy)
   }
   
   Col <- function(unb, crit){
