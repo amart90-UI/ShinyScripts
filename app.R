@@ -1,45 +1,138 @@
-library(shiny)
+require(shiny)
+require(shinycssloaders)
+require(shinyjs)
 
-#############################################################
+require(rgdal)
+require(rgeos)
+require(zip)
+require(dismo)
+require(raster)
+require(matrixStats)
+require(diagram)
 
+#=======================================================================#
+#=======================================================================#
+#                          Ranking Fire Refugia                         #
+#                                                                       #
+#                            Anthony Martinez                           #
+#=======================================================================#
+#=======================================================================#
+
+
+#=======================================================================#
+# Build user interface
+#=======================================================================#
 ui <- fluidPage(
   useShinyjs(),
   titlePanel("Fire Refugia Ranking"),
   sidebarLayout(
     sidebarPanel(
       p("Use filters to select a fire"),
-      checkboxGroupInput(inputId = "inStateGroup", label = "Input state",
-                         choices = c("WA", "OR", "ID", "Other"), 
-                         selected = c("WA", "OR", "ID", "Other")),
-      sliderInput(inputId = "inYearSlide", label = "Select year range", min = 1984, max = 2014, value = c(1984, 2014), sep = ""),
-      textInput(inputId = "inNameText", label = "Enter FireName"),
-      textInput(inputId = "inIdText", label = "Enter MTBS Fire ID"),
+      checkboxGroupInput(inputId = "inStateGroup", 
+                         label = "Fire start state",
+                         choiceValues = c("WA", "OR", "ID", "Other"), 
+                         selected = c("WA", "OR", "ID", "Other"), 
+                         choiceNames = c("WA  ", "OR  ", "ID  ", "Other"),
+                         inline = T,),
+      sliderInput(inputId = "inYearSlide", 
+                  label = "Select year range", 
+                  min = 1984, 
+                  max = 2014, 
+                  value = c(1984, 2014), 
+                  sep = ""),
+      textInput(inputId = "inNameText", 
+                label = "Enter FireName"),
+      textInput(inputId = "inIdText", 
+                label = "Enter MTBS Fire ID"),
       br(),
-      selectInput(inputId = "inSelect", label = "Select fire", choices = firelist$FireDesc)
+      selectInput(inputId = "inSelect", 
+                  label = "Select fire", 
+                  choices = firelist$FireDesc)
     ),
     mainPanel(
       plotOutput(outputId = "fireplot"),
       tableOutput('table')
     )
   ),
-  br(),
+  hr(),
   sidebarLayout(
     sidebarPanel(
-      column(4, offset = 4, actionButton(inputId = "do", label = "  Calculate Criteria  ")),
-      br(), br(), br(),
-      selectInput(inputId = "inCrit", label = "Which criteria to color by", 
-                  choices = c("Refugia Value", "Size", "Isolation", "Seedling", "Infrastructure",
-                              "Stand Age",, "Critical Habitat", "Invasive", "Rarity (land cover)")),
-      disabled(downloadButton(outputId = "downloadFire", label = "Download fire perimeter")),
-      disabled(downloadButton(outputId = "downloadUnb", label = 'Download unburned island'))
+      # Weighting inputs
+      fluidRow(
+        column(3,
+               numericInput(inputId = "HAB.wt", label = "Quality Habitat", value = 1, min = 1, max = 5, step = 1)
+        ),
+        column(3,
+               numericInput(inputId = "INF.wt", label = "Infrastructure", value = 1, min = 1, max = 5, step = 1)
+        ),
+        column(3,
+               numericInput(inputId = "UNQ.wt", label = "Unique Habitat", value = 1, min = 1, max = 5, step = 1)
+        ),
+        column(3)
+      ),
+      hr(),
+      fluidRow(
+        column(3,
+               numericInput(inputId = "size.wt", label = " Size", value = 3, min = 1, max = 5, step = 1)
+        ),
+        column(3,
+               numericInput(inputId = "crit.wt", label = "Critcal Habitat", value = 4, min = 1, max = 5, step = 1)
+        ),
+        column(3,
+               numericInput(inputId = "inv.wt", label = "Invasive species", value = 3, min = 1, max = 5, step = 1)
+        ),
+        column(3)
+      ),
+      hr(),
+      fluidRow(
+        column(3,
+               numericInput(inputId = "seed.wt", label = "Seeding", value = 1, min = 1, max = 5, step = 1)
+        ),
+        column(3,
+               numericInput(inputId = "lndcvr.wt", label = "Rarity of cover", value = 1, min = 1, max = 5, step = 1)
+        ),
+        column(3,
+               numericInput(inputId = "isol.wt", label = "Isolation", value = 1, min = 1, max = 5, step = 1)
+        ),
+        column(3,
+               numericInput(inputId = "age.wt", label = "Stand age", value = 1, min = 1, max = 5, step = 1)
+        )
+      ),
+      hr(),
     ),
     mainPanel(
-      withSpinner(plotOutput(outputId = "fireplotzoom"), type = 5, color = "#ccd1c8")
+      plotOutput(outputId = "treediagram")
+    )
+  ),
+  hr(),
+  sidebarLayout(
+    sidebarPanel(
+      column(4, offset = 4, 
+             actionButton(inputId = "do", 
+                          label = "  Calculate Criteria  ")),
+      hr(),
+      selectInput(inputId = "inCrit", 
+                  label = "Which criteria to color by", 
+                  choices = c("Refugia Value", "Size", "Isolation", "Seedling", "Infrastructure",
+                              "Stand Age", "Critical Habitat", "Invasive", "Rarity (land cover)")),
+      # Download buttons
+      disabled(downloadButton(outputId = "downloadFire", 
+                              label = "Download fire perimeter")),
+      disabled(downloadButton(outputId = "downloadUnb", 
+                              label = 'Download unburned island'))
+    ),
+    mainPanel(
+      withSpinner(plotOutput(outputId = "fireplotzoom"), 
+                  type = 5, 
+                  color = "#ccd1c8")
     )
   )
 )
 
 
+#=======================================================================#
+# Build bacckground computational functions
+#=======================================================================#
 server <- function(input, output, session) {
   require(rgdal)
   require(rgeos)
@@ -67,6 +160,8 @@ server <- function(input, output, session) {
                       choices = FireChoices
     )
   })
+  
+  # Plot large map (zoomed out)
   output$fireplot <- renderPlot({
     plot(pnw)
     plot(fire.perim[fire.perim@data$FireDesc == input$inSelect,], col = "red", border = "red", lwd = 3, add = T)
@@ -75,8 +170,9 @@ server <- function(input, output, session) {
   fire <- eventReactive(input$do, {input$inSelect})
   fire.id <- eventReactive(input$do, {unique(fire.perim$Fire_ID[fire.perim@data$FireDesc %in% fire()])})
   fire.sel <- eventReactive(input$do, {fire.perim[fire.perim$Fire_ID %in% fire.id(),]})
-  unb.sel <- eventReactive(input$do, {unb[unb$fire_id %in% fire.id(),]})
+  unb.sel <- eventReactive(input$do, {unb.isl[unb.isl$fire_id %in% fire.id(),]})
   
+  # Caluculate criteria
   size <- eventReactive(input$do, {Size(unb.sel())})
   isol <- eventReactive(input$do, {Isolation(unb.sel(), fire.sel())})
   seed <- eventReactive(input$do, {Seedling(unb.sel(), fire.sel())})
@@ -103,7 +199,7 @@ server <- function(input, output, session) {
     } else if(input$inCrit == "Invasive"){
       Col(unb.sel(), unb.sel.tab()$Invasiv)
     } else if(input$inCrit == "Rarity (land cover)"){
-      Col(unb.sel(), unb.sel.tab()$lcov)
+      Col(unb.sel(), unb.sel.tab()$LandCvr)
     } else if(input$inCrit == "Refugia Value"){
       Col(unb.sel(), unb.sel.tab()$REFVALUE)
     }
@@ -122,6 +218,7 @@ server <- function(input, output, session) {
     enable("downloadFire")
   })
   
+  # Plot zoomed in fire plot
   clk <- reactiveValues(default = 0)
   observeEvent(input$do, {
     clk$default <- input$do
@@ -138,6 +235,7 @@ server <- function(input, output, session) {
   
   output$fireplotzoom <- renderPlot({fplot()})
   
+  # Build zip files for download
   output$downloadFire <- downloadHandler(
     filename = 'fire_perim.zip',
     content = function(file) {
@@ -169,6 +267,36 @@ server <- function(input, output, session) {
     }
   )
   
+  weights <- reactive(c(input$HAB.wt, input$INF.wt, input$UNQ.wt,
+                        input$size.wt, input$crit.wt, input$inv.wt, input$INF.wt,
+                        input$seed.wt, input$lndcvr.wt, input$isol.wt, input$age.wt))
+  
+  
+  output$treediagram <- renderPlot({
+    par(mfrow=c(1,1))
+    par(mar=c(0,0,0,0))
+    openplotmat()
+    
+    elpos<-coordinates(c(1,3,8 ))
+    ##draw arrows from each row to next row
+    treearrow(from=elpos[1,],to=elpos[c(2:4),],lwd=4, arr.side = 0)  
+    treearrow(from=elpos[2,],to=elpos[5:7,],lwd=4, arr.side = 0)
+    treearrow(from=elpos[3,],to=elpos[8,],lwd=4, arr.side = 0)
+    treearrow(from=elpos[4,],to=elpos[9:12,],lwd=4, arr.side = 0)
+    
+    
+    ##create a generic 3-lined label for each textbox
+    label.1 <- c("Refugia value", "Quality habitat", "Infrastructure", "Unique habitat",
+                 "Size", "Critical Habitat", "Invasive species", "Infrastructure",
+                 "Seedling", "Land Cover", "Isolation", "Stand age")
+    #weights <- c(1,1,1,2,3,2,1,4,5,4,5)
+    #weights <- c()
+    label.2 <- c("\nFinal Value", paste0("\nWt: ", weights()))
+    label.3 <- paste0(label.1, label.2)
+    
+    ##plot text boxes
+    for (i in 1:12) textrect(elpos[i,],radx=0.055,rady=0.05,lab=label.3[i], cex = 1, shadow.size = 0)
+  })
   
   # Define Functions #
   #Define Size function
@@ -439,10 +567,13 @@ server <- function(input, output, session) {
     variables <- c("CritHab", "Infrstr", "Invasiv", "Isolatn", "LandCvr", "Seed", "StndAge", "Size")
     fuzzy <- data.frame(ID = df$ID, 
                         sapply(variables, Cvt2Fz, df = df))
-    fuzzy$Fz_HAB <- apply(fuzzy[, c("Size", "CritHab", "Invasiv")], 1, weighted.mean, w = c(3, 4, 3)) #weighted union
-    fuzzy$Fz_UNQ <- apply(fuzzy[, c("Seed", "LandCvr", "Isolatn", "StndAge")], 1, mean) #union
+    fuzzy$Fz_HAB <- apply(fuzzy[, c("Size", "CritHab", "Invasiv")], 1, weighted.mean, 
+                          w = c(input$size.wt, input$crit.wt, input$inv.wt)) #weighted union
+    fuzzy$Fz_UNQ <- apply(fuzzy[, c("Seed", "LandCvr", "Isolatn", "StndAge")], 1, weighted.mean, 
+                          w = c(input$seed.wt, input$lndcvr.wt, input$isol.wt, input$age.wt)) # weighted union
     fuzzy$Fz_INF <- fuzzy$Infrstr
-    fuzzy$REFVALUE <- apply(fuzzy[, c("Fz_HAB", "Fz_UNQ", "Fz_INF")], 1, mean) #union
+    fuzzy$REFVALUE <- apply(fuzzy[, c("Fz_HAB", "Fz_UNQ", "Fz_INF")], 1, weighted.mean, 
+                            w = c(input$HAB.wt, input$INF.wt, input$UNQ.wt)) # weighted union
     colnames(fuzzy)[2:9] <- paste0("Fz_", variables)
     
     return(fuzzy)
@@ -456,6 +587,5 @@ server <- function(input, output, session) {
     cl <- as.character(cl[order(cl$ID), "col"])
   }
 }
-
 
 shinyApp(ui, server)
