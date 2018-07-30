@@ -33,7 +33,7 @@ ui <- fluidPage(
                          choiceValues = c("WA", "OR", "ID", "Other"), 
                          selected = c("WA", "OR", "ID", "Other"), 
                          choiceNames = c("WA  ", "OR  ", "ID  ", "Other"),
-                         inline = T,),
+                         inline = T),
       sliderInput(inputId = "inYearSlide", 
                   label = "Select year range", 
                   min = 1984, 
@@ -68,7 +68,10 @@ ui <- fluidPage(
         column(3,
                numericInput(inputId = "UNQ.wt", label = "Unique Habitat", value = 1, min = 1, max = 5, step = 1)
         ),
-        column(3)
+        column(2,
+               br(), 
+               checkboxInput(inputId = "checkdefault", label = "Default weights", value = T)
+        )
       ),
       hr(),
       fluidRow(
@@ -97,8 +100,7 @@ ui <- fluidPage(
         column(3,
                numericInput(inputId = "age.wt", label = "Stand age", value = 1, min = 1, max = 5, step = 1)
         )
-      ),
-      hr(),
+      )
     ),
     mainPanel(
       plotOutput(outputId = "treediagram")
@@ -112,7 +114,7 @@ ui <- fluidPage(
                           label = "  Calculate Criteria  ")),
       hr(),
       selectInput(inputId = "inCrit", 
-                  label = "Which criteria to color by", 
+                  label = "Color criteria by:", 
                   choices = c("Refugia Value", "Size", "Isolation", "Seedling", "Infrastructure",
                               "Stand Age", "Critical Habitat", "Invasive", "Rarity (land cover)")),
       # Download buttons
@@ -267,10 +269,32 @@ server <- function(input, output, session) {
     }
   )
   
+  observeEvent(input$checkdefault, {
+    toggleState(id = "HAB.wt")
+    toggleState(id = "INF.wt")
+    toggleState(id = "UNQ.wt")
+    toggleState(id = "size.wt")
+    toggleState(id = "crit.wt")
+    toggleState(id = "inv.wt")
+    toggleState(id = "seed.wt")
+    toggleState(id = "lndcvr.wt")
+    toggleState(id = "isol.wt")
+    toggleState(id = "age.wt")
+    updateNumericInput(session, "HAB.wt", value = 1)
+    updateNumericInput(session, "INF.wt", value = 1)
+    updateNumericInput(session, "UNQ.wt", value = 1)
+    updateNumericInput(session, "size.wt", value = 3)
+    updateNumericInput(session, "crit.wt", value = 4)
+    updateNumericInput(session, "inv.wt", value = 3)
+    updateNumericInput(session, "seed.wt", value = 1)
+    updateNumericInput(session, "lndcvr.wt", value = 1)
+    updateNumericInput(session, "isol.wt", value = 1)
+    updateNumericInput(session, "age.wt", value = 1)
+  })
+  
   weights <- reactive(c(input$HAB.wt, input$INF.wt, input$UNQ.wt,
                         input$size.wt, input$crit.wt, input$inv.wt, input$INF.wt,
                         input$seed.wt, input$lndcvr.wt, input$isol.wt, input$age.wt))
-  
   
   output$treediagram <- renderPlot({
     par(mfrow=c(1,1))
@@ -291,7 +315,7 @@ server <- function(input, output, session) {
                  "Seedling", "Land Cover", "Isolation", "Stand age")
     #weights <- c(1,1,1,2,3,2,1,4,5,4,5)
     #weights <- c()
-    label.2 <- c("\nFinal Value", paste0("\nWt: ", weights()))
+    label.2 <- c("\nFinal Value", paste0("\nWeight: ", weights()))
     label.3 <- paste0(label.1, label.2)
     
     ##plot text boxes
